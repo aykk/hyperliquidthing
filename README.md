@@ -8,15 +8,6 @@ all four strategies use the same entry signal from the top of the l2 book, compu
 
 **None of them made any money past a short-term window. Every version was net-negative after fees!**
 
-## this repo contains:
-
-| Folder / file | What it is |
-|---|---|
-| `bot/` | Python bot. Streams the live order book over WebSocket, computes the trading signal, then either places real orders (on testnet) or simulates them against live mainnet data. Every trade is logged to a SQLite database. |
-| `dashboard/` | Next.js dashboard for P&L, win rate, equity curve, and side-by-side strategy comparison. Built mostly with AI assistance. |
-| `STRATEGY_LOG.md` | Full history: every strategy, its settings, results, and what I learned. |
-| `specs/` | Design specs for each part of the system. |
-
 ## How I tested
 
 Hyperliquid has a testnet (fake money), but its order books are too thin to test a signal like this, since there's barely anyone trading. So I used two setups:
