@@ -20,7 +20,7 @@ load_dotenv(ROOT_DIR / ".env")
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 os.environ.setdefault("SSL_CERT_DIR", os.path.dirname(certifi.where()))
 
-IS_MAINNET: bool = os.getenv("IS_MAINNET", "true").strip().lower() == "true"
+IS_MAINNET: bool = os.getenv("IS_MAINNET", "false").strip().lower() == "true"
 
 MAIN_ACCOUNT_ADDRESS: str | None = os.getenv("MAIN_ACCOUNT_ADDRESS")
 AGENT_ADDRESS: str | None = os.getenv("AGENT_ADDRESS")

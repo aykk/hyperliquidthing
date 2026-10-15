@@ -13,8 +13,9 @@ Flow:
                    -> on CLOSE fill: journal exit (realized pnl) + cancel sibling
   main loop      -> cancel unfilled entries past the TIF, heartbeat status file
 
-SAFETY: set LIVE_DRY_RUN=true to wire everything up and log intended orders
-without sending any. Always validate on testnet (IS_MAINNET=false) first.
+SAFETY: defaults to testnet and dry run, which logs intended orders without
+sending any. Set LIVE_DRY_RUN=false to send real orders, and IS_MAINNET=true
+only after validating on testnet.
 """
 
 from __future__ import annotations
@@ -602,7 +603,7 @@ def main() -> None:
         logger.error("WALLET_PRIVATE_KEY and MAIN_ACCOUNT_ADDRESS must be set in .env")
         return
 
-    dry_run = os.getenv("LIVE_DRY_RUN", "false").strip().lower() == "true"
+    dry_run = os.getenv("LIVE_DRY_RUN", "true").strip().lower() != "false"
     started_at = _utc_iso()
     net = "mainnet" if IS_MAINNET else "testnet"
     logger.info("[live] starting on %s (dry_run=%s, strategy=%s)", net, dry_run, STRATEGY_NAME)

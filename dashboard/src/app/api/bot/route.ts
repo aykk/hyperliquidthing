@@ -98,7 +98,16 @@ export async function GET() {
 // .env (testnet by default); "paper" runs the in-memory simulator.
 const SCRIPTS: Record<string, string> = { live: "live.py", paper: "paper.py" };
 
+// any site open in the browser can post here, so only accept the dashboard's own origin
+function fromDashboard(req: Request): boolean {
+  return req.headers.get("origin") === new URL(req.url).origin;
+}
+
 export async function POST(req: Request) {
+  if (!fromDashboard(req)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
   let action = "";
   let script = "live";
   try {
