@@ -1,70 +1,117 @@
-experimental bot with python + websocket (this stack is way too slow btw) that runs simulated perps trades on live mainnet data from an agent wallet
-implemented a sqlite trading journal and threw in a vibecoded next.js dashboard
+experimental and educational trading bot for [Hyperliquid](https://hyperliquid.xyz) perpetual futures (perps). made with python + websocket (this stack is way too slow btw) that runs simulated perps trades on live mainnet data from an agent wallet
 
-tried 4 different strategies (more info in STRATEGY_LOG.md and the spec files) and a fifth carry strategy:
+implemented a sqlite trading journal and threw in a web dashboard
 
-all four strategies use the same entry signal from the top of the l2 book, compute dollar volume on each side:
+tried 4 different strategies (non-progressive, more info in STRATEGY_LOG.md) and a fifth carry strategy:
 
-## obi_v1: maker-only scalp
+all four strategies use the same entry signal from the top of the l2 book, compute dollar volume on each side.
 
-thesis: rest on the passive side of the book and let someone else cross the spread to you. if the obi signal is real, you get a better price than taker and pay maker fees instead of taker fees.
+**None of them made any money past a short-term window. Every version was net-negative after fees!**
 
-entry: ENTRY_MODE=maker. place a post-only (alo) limit at the best bid (long) or best ask (short). the order sits in the fifo queue until filled or cancelled after the time-in-force window.
+## this repo contains:
 
-exit: standard bracket, stop-loss and take-profit at 1.5% from entry. also exit when the obi signal flips (bid ratio drops below the exit threshold on a long, etc.).
+| Folder / file | What it is |
+|---|---|
+| `bot/` | Python bot. Streams the live order book over WebSocket, computes the trading signal, then either places real orders (on testnet) or simulates them against live mainnet data. Every trade is logged to a SQLite database. |
+| `dashboard/` | Next.js dashboard for P&L, win rate, equity curve, and side-by-side strategy comparison. Built mostly with AI assistance. |
+| `STRATEGY_LOG.md` | Full history: every strategy, its settings, results, and what I learned. |
+| `specs/` | Design specs for each part of the system. |
 
-result (live testnet): 3 closed · 67% win rate · net −$0.021 · −$0.007/trade.
+## How I tested
 
-what i learned: maker fills were rare (~5% of signals). when they did fill, they were adversely selected, price tended to move against us immediately after fill. rare fills + toxic fills = no edge. this is the same failure mode that makes homemade market-making non-viable at our latency tier.
+Hyperliquid has a testnet (fake money), but its order books are too thin to test a signal like this, since there's barely anyone trading. So I used two setups:
 
-## obi_v2: taker-only scalp
+- **Live testnet:** real orders sent to the exchange, using fake money. Used for v1 and v2.
+- **Paper trading on mainnet data:** the bot watches the real order book and real trades, but only *simulates* its own orders. Used for v3, v4 and the carry strategy.
 
-thesis: obi_v1 never actually tested the signal because almost nothing filled. cross the spread aggressively so every signal becomes a real position and we can measure whether obi predicts short-term direction.
+Paper trading is easy to fool yourself with, because it's easy to assume every order fills at a good price. The simulator tries hard not to:
 
-entry: ENTRY_MODE=taker. send a marketable ioc order that lifts the ask (long) or hits the bid (short). slippage capped by MAX_TAKER_SLIPPAGE_PCT.
+- Waiting orders fill only when they "realistically" would, so if the bot places an order at a price where $50k is already waiting, it only counts as filled once $50k of real trades have gone through at that price.
 
-exit: same as v1, stop-loss, take-profit, and signal-flip exit. positions close quickly when the imbalance reverts.
+- Market orders pay for slippage, so exits check the real order book for the full position size instead of assuming the best possible price.
 
-result (live testnet): 3 closed · 0% win rate · net −$0.068 · −$0.023/trade.
+- Fees and funding are charged. Hyperliquid's base fees (0.015% for waiting orders, 0.045% for orders that cross the spread) and hourly funding payments are included by default.
 
-what i learned: fills happen reliably now, but every entry pays the full spread plus taker fee (~0.045%). signal-flip exits close positions on tiny moves that never recover those costs. the gross signal is roughly coin-flip; costs turn it net-negative.
+## The signal
 
-## obi_v3: hybrid entry with confirmation gates
+**Order book imbalance (OBI):** add up the dollar value of the top 10 price levels on each side of the order book.
 
-thesis: combine v1's maker economics when possible with v2's fill reliability as a fallback, and only trade when extra conditions confirm the signal isn't noise or spoofing.
+```
+bid share = bid $ / (bid $ + ask $)
+```
 
-entry: ENTRY_MODE=hybrid. post-only limit first; if unfilled after HYBRID_CHASE_SECONDS, chase with a taker ioc. additional gates (all configurable, off in v1/v2):
+- Bid share ≥ 70% → go long (more buyers waiting than sellers)
+- Bid share ≤ 30% → go short
+- Anything in between → do nothing
 
-spread gate, skip when top-of-book spread is too wide
-aggressor-flow confirmation, recent trade flow must agree with the obi direction
-liquidity floor, skip dead/illiquid windows
-exit: signal-flip exit with hysteresis (MIN_HOLD_SECONDS) so we don't churn in and out on flickering signals. still uses stop-loss and take-profit brackets.
+The idea is that when far more money is waiting to buy than to sell, the price should drift up in the next few seconds.
 
-result (paper mainnet): 5 closed · 0% win rate · net −$0.106 · −$0.021/trade.
+## Results
 
-what i learned: smarter entries and filters reduced bad trades but didn't create positive expectancy. positions still exited on signal flips before moves cleared round-trip costs. the core problem wasn't entry quality, it was that top-of-book obi doesn't predict enough at this timescale to beat fees.
+Net P&L is after fees. Every trade was about $25.
 
-## obi_v4: let winners run
+| Version | What changed | Tested on | Closed trades | Win rate | Before fees | Net P&L |
+|---|---|---|---|---|---|---|
+| obi_v1 | Waiting (limit) orders only | Live testnet | 3 | 33% | −$0.02 | −$0.06 |
+| obi_v2 | Market orders only | Live testnet | 3 | 0% | −$0.07 | −$0.10 |
+| obi_v3 | Mix of both, plus filters to skip bad conditions | Paper, mainnet data | 5 | 0% | +$0.01 | −$0.11 |
+| obi_v4 | No early exit; stop-loss, take-profit and trailing stop only | Paper, mainnet data | 15* | 47% | −$0.27 | −$0.52 |
 
-thesis: v1–v3 all exit too early via signal-flip, scalping out of positions before a real move can pay for costs. disable the flip exit and let stop-loss, take-profit, and a trailing stop manage the trade so winners can run far enough to dwarf fees.
+\*4 of obi_v4's 15 were entry orders that never filled and closed at $0.
 
-entry: same hybrid/taker/maker modes as before (ran with default hybrid settings in paper). no new entry gates beyond v3.
+note: these are very small samples (26 trades across all four versions). They aren't enough to prove anything statistically. The direction was consistent across all four versions, though, and the reasons below line up with why this kind of strategy is known to be hard.
 
-exit: DISABLE_FLIP_EXIT=true. no signal-flip exit. position lives until one of:
+# Notes from each strategy
 
-hard stop-loss at 1% (STOP_LOSS_PCT=0.01)
-take-profit at 1.5% (TAKE_PROFIT_PCT=0.015)
-trailing stop activates after +0.4% unrealized, trails at 0.25% (TRAIL_ACTIVATE_PCT, TRAIL_PCT)
-result (paper mainnet): 13 closed · 38% win rate · net −$0.616 · −$0.047/trade.
+- **v1, waiting orders:** I placed orders at the best bid or ask and waited for someone to trade into them, to avoid paying the spread. Only about 5% filled. The ones that did fill usually filled right before the price moved against me. That's called *adverse selection*: when your order gets filled, it's often because the person on the other side knew something you didn't.
+- **v2, market orders:** every signal turned into a real trade, so I could finally test the signal itself. Each trade paid the spread plus fees, and the bot exited whenever the imbalance flipped, usually before the price had moved enough to cover those costs.
+- **v3, mixed orders plus filters:** I tried a waiting order first and switched to a market order if it didn't fill. I also skipped trades when the spread was wide, the market was quiet, or recent trades disagreed with the signal. It was the only version that came out ahead before fees, by one cent. Fees still made it a loser.
+- **v4, letting winners run:** I removed the early exit so trades could run until they hit a stop-loss, take-profit or trailing stop. It won about half its trades, but the trailing stop locked in small gains (about +$0.09 each), while each full stop-loss cost about −$0.29. In a choppy market, prices rarely moved far enough in one direction to make up for that.
 
-what i learned: worst per-trade expectancy of all four variants. in a flat, low-microstructure-vol regime there is no trend to "run", positions mostly hit the wider stop. the strategy is direction-symmetric, so it opens longs into a downtrend as often as shorts, fighting the tape. open positions often showed green unrealized pnl (misleading); closed-trade expectancy was clearly negative.
+![obi_v4 in the dashboard: simulated equity, win/loss stats and exit reasons](docs/screenshots/performance.png)
 
-summary: all four obi variants were net-negative on closed trades. top-of-book imbalance scalping had no edge for a non-colocated participant at this capital size. see STRATEGY_LOG.md for full numbers and regime context.
+**Bottom line:** before fees, the four versions together were close to break-even (−$0.35 across 26 trades), and fees ($0.42) pushed every one of them negative. Better order handling didn't change that. Faster code or a server closer to the exchange would get orders in sooner, but it wouldn't make a coin-flip signal profitable.
 
-a fifth strategy, carry_v1 (funding carry), was added later as the pivot: delta-neutral short-perp + long-spot to collect funding payments. market-neutral, doesn't need volatility. see STRATEGY_LOG.md for full history and numbers.
+## Funding carry (`carry_v1`)
 
-hyperliquid testnet books are too thin to test a scalping signal meaningfully. so we used paper-on-mainnet:
+Perps have a *funding rate*: a payment every hour between long and short traders that keeps the perp price close to the real asset's price. When funding is positive, shorts get paid.
 
-carry paper can optionally read mainnet funding rates while your wallet stays on testnet (CARRY_FUNDING_MAINNET=true), because testnet funding data is not useful for opportunity scanning.
+The carry strategy shorts the perp and buys the same amount of the asset on the spot market. Price moves on the two sides cancel out, so the position doesn't care which way the market goes. It just collects the funding payments.
 
-overall i most likely need to rebuild bot in rust perhaps as there may be an execution gap? or maybe need to rent an AWS server in Tokyo where Hyperliquid is hosted for colocation.
+- **Estimated return:** about 8% a year after costs, based on funding rates at the time, if each position is held for around 30 days.
+- **Break-even:** opening and closing both sides costs about 0.23%, so a position needs about 7–8 days of funding to pay for itself.
+- **What actually happened:** I paper-traded it for only about 7 hours, with several restarts, before pausing the project. Each restart closed every position, so the journal shows 14 closed positions and −$5.95, which is almost exactly the cost of opening and closing them. That run was far too short to say whether carry works. The ~8% figure is an estimate, not a measured result.
+
+## Running it
+
+```bash
+cd bot
+python3 -m venv .venv
+./.venv/bin/pip install -r requirements.txt
+cp ../.env.example ../.env   # fill in your wallet addresses and agent key
+```
+
+`.env.example` starts on **testnet** (`IS_MAINNET=false`). Don't put a key for a wallet holding real money in `.env` until you've read `bot/README.md`.
+
+```bash
+# Paper-trade the OBI strategy against live mainnet data
+IS_MAINNET=true ./.venv/bin/python paper.py
+
+# Scan for the best funding carry opportunities right now (read-only)
+IS_MAINNET=true ./.venv/bin/python carry.py scan --top 15
+
+# Paper-trade the carry strategy with $1,000
+IS_MAINNET=true CARRY_CAPITAL=1000 ./.venv/bin/python carry.py paper
+
+# Dashboard (http://localhost:3000)
+cd ../dashboard && npm install && npm run dev
+```
+
+`bot/README.md` has the full module breakdown, every setting, and how the fill simulator works.
+
+## Status
+
+Paused. The open questions are in `STRATEGY_LOG.md`. The two I'd test next:
+
+- Run carry for several weeks, then with a small amount of real money, to see if the ~8% estimate survives real fills, slippage and the price gap between spot and perp.
+- Try a slower, trend-following strategy that holds for hours or days instead of seconds, where fees matter much less.
