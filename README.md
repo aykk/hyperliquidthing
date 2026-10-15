@@ -63,24 +63,19 @@ note: these are very small samples (26 trades across all four versions). They ar
 
 # Notes from each strategy
 
-- **v1, waiting orders:** I placed orders at the best bid or ask and waited for someone to trade into them, to avoid paying the spread. Only about 5% filled. The ones that did fill usually filled right before the price moved against me. That's called *adverse selection*: when your order gets filled, it's often because the person on the other side knew something you didn't.
+- **v1, waiting orders:** I placed orders at the best bid or ask and waited for someone to trade into them, to avoid paying the spread. Only about 5% filled. The ones that did fill usually filled right before the price moved against me (adverse selection).
+
 - **v2, market orders:** every signal turned into a real trade, so I could finally test the signal itself. Each trade paid the spread plus fees, and the bot exited whenever the imbalance flipped, usually before the price had moved enough to cover those costs.
-- **v3, mixed orders plus filters:** I tried a waiting order first and switched to a market order if it didn't fill. I also skipped trades when the spread was wide, the market was quiet, or recent trades disagreed with the signal. It was the only version that came out ahead before fees, by one cent. Fees still made it a loser.
+
+- **v3, mixed orders plus filters:** I tried a waiting order first and switched to a market order if it didn't fill. I also skipped trades when the spread was wide, the market was dead, or recent trades disagreed with the signal. It was the only version that came out ahead before fees, by one cent. Regardless, fees tore the strategy down in the end.
+
 - **v4, letting winners run:** I removed the early exit so trades could run until they hit a stop-loss, take-profit or trailing stop. It won about half its trades, but the trailing stop locked in small gains (about +$0.09 each), while each full stop-loss cost about −$0.29. In a choppy market, prices rarely moved far enough in one direction to make up for that.
-
-![obi_v4 in the dashboard: simulated equity, win/loss stats and exit reasons](docs/screenshots/performance.png)
-
-**Bottom line:** before fees, the four versions together were close to break-even (−$0.35 across 26 trades), and fees ($0.42) pushed every one of them negative. Better order handling didn't change that. Faster code or a server closer to the exchange would get orders in sooner, but it wouldn't make a coin-flip signal profitable.
 
 ## Funding carry (`carry_v1`)
 
 Perps have a *funding rate*: a payment every hour between long and short traders that keeps the perp price close to the real asset's price. When funding is positive, shorts get paid.
 
 The carry strategy shorts the perp and buys the same amount of the asset on the spot market. Price moves on the two sides cancel out, so the position doesn't care which way the market goes. It just collects the funding payments.
-
-- **Estimated return:** about 8% a year after costs, based on funding rates at the time, if each position is held for around 30 days.
-- **Break-even:** opening and closing both sides costs about 0.23%, so a position needs about 7–8 days of funding to pay for itself.
-- **What actually happened:** I paper-traded it for only about 7 hours, with several restarts, before pausing the project. Each restart closed every position, so the journal shows 14 closed positions and −$5.95, which is almost exactly the cost of opening and closing them. That run was far too short to say whether carry works. The ~8% figure is an estimate, not a measured result.
 
 ## Running it
 
@@ -111,7 +106,8 @@ cd ../dashboard && npm install && npm run dev
 
 ## Status
 
-Paused. The open questions are in `STRATEGY_LOG.md`. The two I'd test next:
+- Refine and run carry strategy properly, then with a small amount of real money. Testing it thoroughly would require running it 24/7 on a server for weeks.
 
-- Run carry for several weeks, then with a small amount of real money, to see if the ~8% estimate survives real fills, slippage and the price gap between spot and perp.
 - Try a slower, trend-following strategy that holds for hours or days instead of seconds, where fees matter much less.
+
+- Considering a rebuild of bot in rust as there may be an execution speed gap(?) and renting an AWS server in Tokyo for colocation with Hyperliquid's servers.
