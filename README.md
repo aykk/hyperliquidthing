@@ -67,4 +67,4 @@ hyperliquid testnet books are too thin to test a scalping signal meaningfully. s
 
 carry paper can optionally read mainnet funding rates while your wallet stays on testnet (CARRY_FUNDING_MAINNET=true), because testnet funding data is not useful for opportunity scanning.
 
-at the end of the day ts bricked so i'm gonna try making something with rust and renting an aws server in tokyo to run the bot on so i have the advantage of colocation
+overall i most likely need to rebuild bot in rust perhaps as there may be an execution gap? or maybe need to rent an AWS server in Tokyo where Hyperliquid is hosted for colocation.
